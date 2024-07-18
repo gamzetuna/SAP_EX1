@@ -1,0 +1,615 @@
+*&---------------------------------------------------------------------*
+*& Include          ZG_IADE_PRGRM_FRM
+*&---------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*& Form iade_frm
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM iade_frm .
+
+  REFRESH it_fcat.
+  REFRESH gt_events.
+
+  SELECT  d~opbel
+          d~vkont
+          d~gpart
+          b~mc_name2
+          b~mc_name1
+          d~bukrs
+          d~budat
+          d~betrh
+    FROM  but000 AS b
+    INNER JOIN dfkkop AS d ON b~partner  EQ d~gpart
+    INTO CORRESPONDING FIELDS OF TABLE it_itab
+    WHERE d~augst  = ' '
+      AND d~augrd <> 5
+      AND d~hvorg = '0060'
+      AND d~tvorg = '0010'.
+
+  CALL FUNCTION 'REUSE_ALV_FIELDCATALOG_MERGE'
+    EXPORTING
+      i_program_name   = sy-repid
+*     i_internal_tabname = 'gt_list'
+      i_structure_name = 'ZGT_IADE_STR'
+*     i_inclname       = sy-repid
+    CHANGING
+      ct_fieldcat      = it_fcat.
+
+
+  READ TABLE it_fcat ASSIGNING <gfs_fc> WITH KEY fieldname  = 'GV_IBAN'.
+  IF sy-subrc EQ 0.
+    <gfs_fc>-edit = abap_true.
+  ENDIF.
+
+  READ TABLE it_fcat ASSIGNING <gfs_fc> WITH KEY fieldname  = 'CHECK'.
+  IF sy-subrc EQ 0.
+    <gfs_fc>-edit = abap_true.
+    <gfs_fc>-checkbox = abap_true.
+    <gfs_fc>-key = abap_true.
+    <gfs_fc>-seltext_s = 'SEC'.
+    <gfs_fc>-col_pos = '1'.
+*    <gfs_fc>-
+  ENDIF.
+
+  READ TABLE it_fcat ASSIGNING <gfs_fc> WITH KEY fieldname  = 'GV_MSG'.
+  IF sy-subrc EQ 0.
+    <gfs_fc>-key = abap_true.
+    <gfs_fc>-seltext_m = 'MESAJ'.
+    <gfs_fc>-seltext_s = 'MESAJ'.
+    <gfs_fc>-seltext_l = 'MESAJ'.
+  ENDIF.
+
+  PERFORM set_layout.
+
+  gs_event-name = slis_ev_top_of_page.
+  gs_event-form = 'TOP_OF_PAGE'.
+  APPEND gs_event TO gt_events.
+
+  gs_event-name = slis_ev_pf_status_set.
+  gs_event-form = 'PF_STATUS'.
+  APPEND gs_event TO gt_events.
+
+
+  CALL FUNCTION 'REUSE_ALV_GRID_DISPLAY'
+    EXPORTING
+      i_callback_program      = sy-repid
+      i_callback_user_command = 'USER_COMMAND'
+      i_callback_top_of_page  = 'TOP_OF_PAGE'
+*     i_callback_pf_status_set = 'PF_STATUS'
+      is_layout               = gs_layout
+      it_fieldcat             = it_fcat
+      it_events               = gt_events
+      i_save                  = 'X'
+    TABLES
+      t_outtab                = it_itab
+    EXCEPTIONS
+      program_error           = 1
+      OTHERS                  = 2.
+ENDFORM.
+
+FORM pf_status USING rt_extab TYPE slis_t_extab.
+
+  SET PF-STATUS '0200'.
+
+ENDFORM.
+
+FORM user_command USING pv_ucomm TYPE sy-ucomm
+                        pw_selfield TYPE slis_selfield.
+
+  DATA: lo_alv  TYPE REF TO cl_gui_alv_grid.
+
+  IF lo_alv IS INITIAL.
+    CALL FUNCTION 'GET_GLOBALS_FROM_SLVC_FULLSCR'
+      IMPORTING
+        e_grid = lo_alv.
+  ENDIF.
+
+  IF lo_alv IS NOT INITIAL.
+    CALL METHOD lo_alv->check_changed_data.
+    CALL METHOD cl_gui_cfw=>flush.
+  ENDIF.
+
+  pw_selfield-refresh = abap_true.
+  CASE  pv_ucomm.
+    WHEN '&ONY'.
+      LOOP AT it_itab INTO wa_itab WHERE check EQ abap_true.
+        PERFORM iban.
+        IF wa_itab-gv_msg EQ 'İşlem Başarılı'.
+          wa_zlog-opbel    = wa_itab-opbel.
+          wa_zlog-vkont    = wa_itab-vkont.
+          wa_zlog-gpart    = wa_itab-gpart.
+          wa_zlog-mc_name2 = wa_itab-mc_name2.
+          wa_zlog-mc_name1 = wa_itab-mc_name1.
+          wa_zlog-bukrs    = wa_itab-bukrs.
+          wa_zlog-budat    = wa_itab-budat.
+          wa_zlog-betrh    = wa_itab-betrh.
+          wa_zlog-iban     = wa_itab-gv_iban.
+          wa_zlog-statu    = '1'.
+          MODIFY zgt_zlog FROM wa_zlog.
+        ENDIF.
+      ENDLOOP.
+
+  ENDCASE.
+ENDFORM.
+FORM top_of_page.
+
+  DATA : t_header      TYPE slis_t_listheader,
+         wa_header     TYPE slis_listheader,
+         t_line        LIKE wa_header-info,
+         ld_lines      TYPE i,
+         ld_linesc(10) TYPE c.
+
+  wa_header-typ = 'H'.
+  wa_header-info = 'iADE BEDELLERİ EKRANI'.
+  APPEND wa_header TO t_header.
+  CLEAR wa_header.
+
+  wa_header-typ = 'S'.
+  wa_header-key = 'Date:'.
+  CONCATENATE  sy-datum+6(2)'.'
+               sy-datum+4(2)'.'
+               sy-datum(4) INTO wa_header-info.
+
+  APPEND wa_header TO t_header.
+  CLEAR wa_header.
+
+  wa_header-typ = 'A'.
+  wa_header-info = t_line.
+  APPEND wa_header TO t_header.
+  CLEAR wa_header.
+
+  CALL FUNCTION 'REUSE_ALV_COMMENTARY_WRITE'
+    EXPORTING
+      it_list_commentary = t_header.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form onay_frm
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM onay_frm .
+
+  REFRESH   it_fcat.
+  REFRESH   gt_events.
+
+  SELECT opbel
+         vkont
+         gpart
+         mc_name2
+         mc_name1
+         bukrs
+         budat
+         betrh
+         iban
+         statu
+       FROM zgt_zlog
+       INTO CORRESPONDING FIELDS OF TABLE itab_onay
+       WHERE statu = '1'.
+*        AND gv_muht = z~gpart
+*        AND gv_sozl = z~vkont.
+
+*SELECT * Into Table @Data(it_zgtzlog) FROM zgt_zlog
+*    where statu = '1'
+*          AND gpart IN @gs_gpart
+*          AND vkont IN @gs_vkont.
+
+
+
+  CALL FUNCTION 'REUSE_ALV_FIELDCATALOG_MERGE'
+    EXPORTING
+      i_program_name   = sy-repid
+*     i_internal_tabname = 'İTAB_ZLOG'
+      i_structure_name = 'ZGT_ONAY_STR'
+*     i_inclname       = sy-repid
+    CHANGING
+      ct_fieldcat      = it_fcat.
+
+  READ TABLE it_fcat ASSIGNING <gfs_fc> WITH KEY fieldname  = 'CHECK'.
+  IF sy-subrc EQ 0.
+    <gfs_fc>-edit = abap_true.
+    <gfs_fc>-checkbox = abap_true.
+    <gfs_fc>-key = abap_true.
+    <gfs_fc>-seltext_s = 'SEC'.
+    <gfs_fc>-col_pos = 1.
+  ENDIF.
+
+  PERFORM set_layout.
+
+  gs_event-name = slis_ev_pf_status_set.
+  gs_event-form = 'PF_STATUS_ONAY'.
+  APPEND gs_event TO gt_events.
+
+  CALL FUNCTION 'REUSE_ALV_GRID_DISPLAY'
+    EXPORTING
+      i_callback_program      = sy-repid
+      i_callback_user_command = 'USER_COMMAND_ONAY'
+*     i_callback_top_of_page  = 'TOP_OF_PAGE'
+*     i_callback_pf_status_set = 'PF_STATUS_ONAY'
+      is_layout               = gs_layout
+      it_fieldcat             = it_fcat
+      it_events               = gt_events
+      i_save                  = 'X'
+    TABLES
+      t_outtab                = itab_onay
+    EXCEPTIONS
+      program_error           = 1
+      OTHERS                  = 2.
+
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form muhasebe_frm
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM muhasebe_frm .
+
+  REFRESH it_fcat.
+  REFRESH gt_events.
+
+  SELECT opbel
+         vkont
+         gpart
+         mc_name2
+         mc_name1
+         bukrs
+         budat
+         betrh
+         iban
+         statu
+     FROM zgt_zlog
+     INTO CORRESPONDING FIELDS OF TABLE itab_muh
+     WHERE statu = '2' OR statu = '3'.
+
+
+  CALL FUNCTION 'REUSE_ALV_FIELDCATALOG_MERGE'
+    EXPORTING
+      i_program_name   = sy-repid
+      i_structure_name = 'ZGT_MUH_STR'
+    CHANGING
+      ct_fieldcat      = it_fcat.
+
+  READ TABLE it_fcat ASSIGNING <gfs_fc> WITH KEY fieldname  = 'CHECK'.
+  IF sy-subrc EQ 0.
+    <gfs_fc>-edit = abap_true.
+    <gfs_fc>-checkbox = abap_true.
+    <gfs_fc>-key = abap_true.
+    <gfs_fc>-seltext_s = 'SEC'.
+*    <gfs_fc>-
+    <gfs_fc>-col_pos = 1.
+  ENDIF.
+
+  READ TABLE it_fcat ASSIGNING <gfs_fc> WITH KEY fieldname  = 'MESSAGE'.
+  IF sy-subrc EQ 0.
+    <gfs_fc>-seltext_s = 'Hata Mesajı'.
+  ENDIF.
+   READ TABLE it_fcat ASSIGNING <gfs_fc> WITH KEY fieldname  = 'STATU'.
+  IF sy-subrc EQ 0.
+    <gfs_fc>-seltext_s = 'STATU'.
+  ENDIF.
+
+
+
+  PERFORM set_layout.
+
+  CALL FUNCTION 'REUSE_ALV_GRID_DISPLAY'
+    EXPORTING
+      i_callback_program       = sy-repid
+      i_callback_user_command  = 'USER_COMMAND_MUH'
+      i_callback_pf_status_set = 'PF_STATUS_MUH'
+      is_layout                = gs_layout
+      it_fieldcat              = it_fcat
+      it_events                = gt_events
+      i_save                   = 'X'
+    TABLES
+      t_outtab                 = itab_muh
+    EXCEPTIONS
+      program_error            = 1
+      OTHERS                   = 2.
+
+
+
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*& Form iban
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM iban .
+  CALL FUNCTION 'CHECK_IBAN'
+    EXPORTING
+      i_iban             = wa_itab-gv_iban
+      i_mod97_check_only = 'X'
+    EXCEPTIONS
+      not_valid          = 1
+      OTHERS             = 2.
+  IF sy-subrc EQ 0.
+    wa_itab-gv_msg = 'İşlem Başarılı'.
+    MODIFY it_itab FROM wa_itab.
+  ELSEIF sy-subrc EQ 1.
+    wa_itab-gv_msg = 'Hatalı IBAN'.
+    MODIFY it_itab FROM wa_itab.
+  ENDIF.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form set_layout
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM set_layout .
+  gs_layout-zebra = abap_true.
+  gs_layout-colwidth_optimize = 'X'.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form USER_COMMAND_ONAY
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM user_command_onay  USING s_ucomm TYPE sy-ucomm
+                        ss_selfield TYPE slis_selfield.
+
+  DATA: go_alv  TYPE REF TO cl_gui_alv_grid.
+
+  IF go_alv IS INITIAL.
+    CALL FUNCTION 'GET_GLOBALS_FROM_SLVC_FULLSCR'
+      IMPORTING
+        e_grid = go_alv.
+  ENDIF.
+
+  IF go_alv IS NOT INITIAL.
+    CALL METHOD go_alv->check_changed_data.
+*    CALL METHOD lo_alv->refresh_table_display.
+    CALL METHOD cl_gui_cfw=>flush.
+  ENDIF.
+
+  ss_selfield-refresh = abap_true.
+
+  CASE  s_ucomm.
+    WHEN '&ONAYLA'.
+      LOOP AT itab_onay INTO wa_onay WHERE check EQ abap_true.
+        wa_zlog-opbel = wa_onay-opbel.
+        wa_zlog-vkont = wa_onay-vkont.
+        wa_zlog-gpart = wa_onay-gpart.
+        wa_zlog-mc_name2  = wa_onay-mc_name2.
+        wa_zlog-mc_name1 = wa_onay-mc_name1.
+        wa_zlog-bukrs = wa_onay-bukrs.
+        wa_zlog-budat = wa_onay-budat.
+        wa_zlog-betrh = wa_onay-betrh.
+        wa_zlog-iban  = wa_onay-iban.
+        wa_zlog-statu = '2'.
+        MODIFY zgt_zlog FROM wa_zlog.
+      ENDLOOP.
+  ENDCASE.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form PF_STATUS_ONAY
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM pf_status_onay USING rt_extab TYPE slis_t_extab.
+
+  SET PF-STATUS '0300'.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form PF_STATUS_MUH
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM pf_status_muh USING rt_extab TYPE slis_t_extab.
+  SET PF-STATUS '0400'.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form USER_COMMAND_MUH
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM user_command_muh USING s_ucomm TYPE sy-ucomm
+                        ss_selfield TYPE slis_selfield.
+
+  DATA: go_alv  TYPE REF TO cl_gui_alv_grid.
+
+  DATA : it_log TYPE zgt_zlog.
+
+  IF go_alv IS INITIAL.
+    CALL FUNCTION 'GET_GLOBALS_FROM_SLVC_FULLSCR'
+      IMPORTING
+        e_grid = go_alv.
+  ENDIF.
+
+  IF go_alv IS NOT INITIAL.
+    CALL METHOD go_alv->check_changed_data.
+*    CALL METHOD lo_alv->refresh_table_display.
+    CALL METHOD cl_gui_cfw=>flush.
+  ENDIF.
+
+  ss_selfield-refresh = abap_true.
+
+  CASE  s_ucomm.
+    WHEN '&LST'.
+      LOOP AT itab_muh INTO wa_muh WHERE check EQ abap_true.
+        wa_zlog-opbel = wa_muh-opbel.
+        wa_zlog-vkont = wa_muh-vkont.
+        wa_zlog-gpart = wa_muh-gpart.
+        wa_zlog-mc_name2   = wa_muh-mc_name2.
+        wa_zlog-mc_name1 = wa_muh-mc_name1.
+        wa_zlog-bukrs = wa_muh-bukrs.
+        wa_zlog-budat = wa_muh-budat.
+        wa_zlog-betrh = wa_muh-betrh.
+        wa_zlog-iban  = wa_muh-iban.
+        wa_zlog-statu = '3'.
+        MODIFY zgt_zlog FROM wa_zlog.
+         wa_muh-message = 'Listelem başarı ile gerçekleşti.'.
+        MODIFY itab_muh FROM wa_muh.
+      ENDLOOP.
+      PERFORM muh_download.
+    WHEN '&ODE'.
+      LOOP AT itab_muh INTO wa_muh WHERE check EQ abap_true.
+        PERFORM Odeme.
+        " boş olduğunda işlmleri yaptıracksın !!
+        wa_zlog-opbel = wa_muh-opbel.
+        wa_zlog-vkont = wa_muh-vkont.
+        wa_zlog-gpart = wa_muh-gpart.
+        wa_zlog-mc_name2    = wa_muh-mc_name2.
+        wa_zlog-mc_name1 = wa_muh-mc_name1.
+        wa_zlog-bukrs = wa_muh-bukrs.
+        wa_zlog-budat = wa_muh-budat.
+        wa_zlog-betrh = wa_muh-betrh.
+        wa_zlog-iban  = wa_muh-iban.
+        wa_zlog-statu = '4'.
+        MODIFY zgt_zlog FROM wa_zlog.
+      ENDLOOP.
+      IF wa_muh-statu = 2.
+        wa_muh-message = 'Önce Listeleme İşlemi Yapınız'.
+        else.
+          LOOP AT  itab_muh INTO wa_muh WHERE check EQ abap_true.
+        wa_muh-statu = '4'.
+        wa_muh-message = 'Ödeme başarı ile gerçekleşti.'.
+        MODIFY itab_muh FROM wa_muh.
+      ENDLOOP.
+      ENDIF.
+  ENDCASE.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form muh_download
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM muh_download .
+
+  SELECT opbel
+         vkont
+         gpart
+         mc_name2
+         mc_name1
+         bukrs
+         budat
+         betrh
+         iban
+         statu
+    FROM zgt_zlog
+    INTO CORRESPONDING FIELDS OF TABLE itab_zlog.
+
+
+  CALL FUNCTION 'GUI_DOWNLOAD'
+    EXPORTING
+      filename                = 'C:\Yeni klasör\download.xlsx'
+      filetype                = 'ASC'
+      write_field_separator   = 'X'
+    TABLES
+      data_tab                = itab_zlog
+    EXCEPTIONS
+      file_write_error        = 1
+      no_batch                = 2
+      gui_refuse_filetransfer = 3
+      invalid_type            = 4
+      no_authority            = 5
+      unknown_error           = 6
+      header_not_allowed      = 7
+      separator_not_allowed   = 8
+      filesize_not_allowed    = 9
+      header_too_long         = 10
+      dp_error_create         = 11
+      dp_error_send           = 12
+      dp_error_write          = 13
+      unknown_dp_error        = 14
+      access_denied           = 15
+      dp_out_of_memory        = 16
+      disk_full               = 17
+      dp_timeout              = 18
+      file_not_found          = 19
+      dataprovider_exception  = 20
+      control_flush_error     = 21
+      OTHERS                  = 22.
+
+  IF sy-subrc <> 0.
+*    MESSAGE ID  sy-msgid TYPE sy-msgty NUMBER sy-msgno
+*                         WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+  ELSE.
+    MESSAGE  'Dosya Aktarıldı' TYPE 'S'.
+    wa_zlog-statu = '3'.
+    MODIFY zgt_zlog FROM wa_zlog.
+  ENDIF.
+
+  LOOP AT  itab_muh INTO wa_muh WHERE check EQ abap_true.
+    wa_muh-statu = '3'.
+    MODIFY itab_muh FROM wa_muh.
+  ENDLOOP.
+
+  CALL FUNCTION 'SAP_CONVERT_TO_XLS_FORMAT'
+    EXPORTING
+      i_filename        = 'C:\Yeni klasör\download.xlsx'
+    TABLES
+      i_tab_sap_data    = itab_zlog
+    EXCEPTIONS
+      conversion_failed = 1
+      OTHERS            = 2.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form Odeme
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM Odeme.
+
+  DATA: lv_return TYPE bapiret2.
+
+
+  IF lv_return IS INITIAL.
+    LOOP AT itab_muh INTO wa_muh WHERE check EQ abap_true.
+      IF wa_muh-statu = 3.
+        CALL FUNCTION 'ZGT_IADE_FM'
+          EXPORTING
+            i_opbel  = wa_muh-opbel
+          IMPORTING
+            e_return = lv_return.
+      ELSE.
+        wa_muh-message = 'Önce listeleme işlemi yapınız'.
+        MODIFY itab_muh FROM wa_muh.
+      ENDIF.
+    ENDLOOP.
+  ENDIF.
+  IF lv_return IS NOT INITIAL.
+    MESSAGE 'Hata!! İşleme devam edilemiyor!' TYPE 'S'.
+  ELSE.
+  ENDIF.
+ENDFORM.
